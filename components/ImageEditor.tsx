@@ -107,6 +107,8 @@ const VideoRecorder: React.FC<{ onVideoRecorded: (videoFile: File) => void }> = 
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const mediaStreamRef = useRef<MediaStream | null>(null);
     const { showToast } = useToast();
+    const [elapsedTime, setElapsedTime] = useState(0);
+    const timerIntervalRef = useRef<number | null>(null);
 
     const cleanupStream = useCallback(() => {
         if (mediaStreamRef.current) {
@@ -114,10 +116,20 @@ const VideoRecorder: React.FC<{ onVideoRecorded: (videoFile: File) => void }> = 
             mediaStreamRef.current = null;
         }
     }, []);
+    
+    const cleanupTimer = useCallback(() => {
+        if (timerIntervalRef.current) {
+            clearInterval(timerIntervalRef.current);
+            timerIntervalRef.current = null;
+        }
+    }, []);
 
     useEffect(() => {
-        return () => cleanupStream();
-    }, [cleanupStream]);
+        return () => {
+            cleanupStream();
+            cleanupTimer();
+        };
+    }, [cleanupStream, cleanupTimer]);
 
     const startPreview = useCallback(async () => {
         if (!navigator.mediaDevices?.getUserMedia) {
@@ -160,12 +172,18 @@ const VideoRecorder: React.FC<{ onVideoRecorded: (videoFile: File) => void }> = 
         };
 
         mediaRecorder.onstop = () => {
+            cleanupTimer();
             const blob = new Blob(recordedChunks, { type: 'video/webm' });
             setRecordedBlob(blob);
             setRecordedUrl(URL.createObjectURL(blob));
             setStatus('preview');
             cleanupStream();
         };
+        
+        setElapsedTime(0);
+        timerIntervalRef.current = window.setInterval(() => {
+            setElapsedTime(prev => prev + 1);
+        }, 1000);
 
         mediaRecorder.start();
         showToast("Recording started!", "info");
@@ -179,6 +197,7 @@ const VideoRecorder: React.FC<{ onVideoRecorded: (videoFile: File) => void }> = 
     };
 
     const handleRecordAgain = () => {
+        cleanupTimer();
         setStatus('idle');
         setRecordedBlob(null);
         setRecordedUrl(null);
@@ -190,6 +209,12 @@ const VideoRecorder: React.FC<{ onVideoRecorded: (videoFile: File) => void }> = 
             onVideoRecorded(videoFile);
         }
     };
+    
+    const formatTime = (seconds: number) => {
+        const minutes = Math.floor(seconds / 60);
+        const remainingSeconds = seconds % 60;
+        return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`;
+    };
 
     return (
         <div className="space-y-6">
@@ -197,7 +222,16 @@ const VideoRecorder: React.FC<{ onVideoRecorded: (videoFile: File) => void }> = 
                 <h2 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-amber-400 to-orange-500">Video Recorder</h2>
                 <p className="text-sm text-slate-400 mt-1 max-w-xl mx-auto">Record a short video of your gym or an exercise for AI analysis.</p>
             </div>
-            <div className="w-full max-w-2xl mx-auto bg-black rounded-lg overflow-hidden border border-slate-700">
+            <div className="w-full max-w-2xl mx-auto bg-black rounded-lg overflow-hidden border border-slate-700 relative">
+                {status === 'recording' && (
+                    <div className="absolute top-3 left-3 z-10 flex items-center gap-2 bg-black/50 text-white px-3 py-1.5 rounded-lg text-sm font-mono pointer-events-none">
+                        <span className="relative flex h-3 w-3">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                        </span>
+                        <span>{formatTime(elapsedTime)}</span>
+                    </div>
+                )}
                 <video ref={videoPreviewRef} playsInline autoPlay muted className={`w-full ${status === 'preview' && !recordedUrl ? 'hidden': ''}`} />
                 {status === 'preview' && recordedUrl && (
                      <video src={recordedUrl} controls autoPlay className="w-full" />

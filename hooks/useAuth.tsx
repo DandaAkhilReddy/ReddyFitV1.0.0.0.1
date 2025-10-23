@@ -1,10 +1,12 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { User, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
+// Fix: Import firebase compat app to get User type.
+import firebase from 'firebase/compat/app';
+import 'firebase/compat/auth';
 import { auth, googleProvider } from '../firebase';
 import { useToast } from './useToast';
 
 interface AuthContextType {
-    user: User | null;
+    user: firebase.User | null;
     loading: boolean;
     signInWithGoogle: () => Promise<void>;
     signOutUser: () => Promise<void>;
@@ -13,12 +15,13 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    const [user, setUser] = useState<User | null>(null);
+    const [user, setUser] = useState<firebase.User | null>(null);
     const [loading, setLoading] = useState(true);
     const { showToast } = useToast();
 
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+        // Fix: Use compat namespaced API for onAuthStateChanged
+        const unsubscribe = auth.onAuthStateChanged((currentUser) => {
             setUser(currentUser);
             setLoading(false);
         });
@@ -29,7 +32,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const signInWithGoogle = useCallback(async () => {
         try {
-            await signInWithPopup(auth, googleProvider);
+            // Fix: Use compat namespaced API for signInWithPopup
+            await auth.signInWithPopup(googleProvider);
             showToast("Successfully signed in!", "success");
         } catch (error: any) {
             console.error("Error signing in with Google: ", error);
@@ -39,7 +43,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const signOutUser = useCallback(async () => {
         try {
-            await signOut(auth);
+            // Fix: Use compat namespaced API for signOut
+            await auth.signOut();
             showToast("You have been signed out.", "info");
         } catch (error: any) {
             console.error("Error signing out: ", error);

@@ -1,6 +1,10 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
+// Fix: Use firebase.User type from compat library
+import firebase from 'firebase/compat/app';
+import 'firebase/compat/auth';
 import { extractFramesFromVideo } from '../utils/frameExtractor';
 import { analyzeVideoWithFrames, generateWorkoutPlan, WorkoutPlan, Exercise, generateExerciseVideo } from '../services/geminiService';
+import { saveWorkoutPlan as savePlanToCloud } from '../services/firestoreService';
 import { ApiKeyError } from '../utils/errors';
 import { ExerciseVideoPlayer } from '../ExerciseVideoPlayer';
 import * as dbService from '../database/dbService';
@@ -45,11 +49,12 @@ const GradientButton: React.FC<{onClick: () => void; disabled: boolean; children
 );
 
 interface GymAnalyzerProps {
+    user: firebase.User | null;
     initialVideoFile?: File | null;
     onInitialVideoConsumed?: () => void;
 }
 
-export const GymAnalyzer: React.FC<GymAnalyzerProps> = ({ initialVideoFile, onInitialVideoConsumed }) => {
+export const GymAnalyzer: React.FC<GymAnalyzerProps> = ({ user, initialVideoFile, onInitialVideoConsumed }) => {
     const [videoFile, setVideoFile] = useState<File | null>(null);
     const [videoUrl, setVideoUrl] = useState<string | null>(null);
     const [loadingState, setLoadingState] = useState({ active: false, message: '', subtext: ''});
@@ -324,7 +329,8 @@ export const GymAnalyzer: React.FC<GymAnalyzerProps> = ({ initialVideoFile, onIn
         const cacheKey = `${equipmentList}-${fitnessLevel}-${goal}`;
 
         try {
-            if (!isRegeneration) {
+            // For logged-out users, check local IndexedDB
+            if (!user && !isRegeneration) {
                 const cachedPlan = await dbService.get<WorkoutPlan>('workoutPlans', cacheKey);
                 if (cachedPlan) {
                     setWorkoutPlan(cachedPlan);
@@ -337,8 +343,16 @@ export const GymAnalyzer: React.FC<GymAnalyzerProps> = ({ initialVideoFile, onIn
                  setLoadingState(prev => ({ ...prev, subtext: `Model is busy. Retrying... (Attempt ${attempt + 1}/${maxAttempts})` }));
             }, isRegeneration);
             setWorkoutPlan(plan);
-            await dbService.set('workoutPlans', cacheKey, plan);
-            showToast(isRegeneration ? "New workout plan generated!" : "Personalized workout plan generated and saved!", "success");
+            
+            // Save to Firestore for logged-in users, or IndexedDB for guests
+            if (user) {
+                await savePlanToCloud(user.uid, plan, equipmentList);
+                 showToast(isRegeneration ? "New workout plan generated and saved to your profile!" : "Personalized workout plan generated and saved to your profile!", "success");
+            } else {
+                await dbService.set('workoutPlans', cacheKey, plan);
+                showToast(isRegeneration ? "New workout plan generated!" : "Personalized workout plan generated and saved!", "success");
+            }
+
 
         } catch (e: any) {
             const errorMessage = e.message || 'The workout plan could not be generated. This is likely a temporary issue. Please try again in a moment.';
@@ -348,7 +362,7 @@ export const GymAnalyzer: React.FC<GymAnalyzerProps> = ({ initialVideoFile, onIn
         } finally {
             setLoadingState({ active: false, message: '', subtext: '' });
         }
-    }, [equipmentList, fitnessLevel, goal, showToast]);
+    }, [equipmentList, fitnessLevel, goal, showToast, user]);
 
     const handleGeneratePlanClick = () => generatePlan(false);
     const handleRegeneratePlanClick = () => generatePlan(true);
@@ -370,7 +384,6 @@ export const GymAnalyzer: React.FC<GymAnalyzerProps> = ({ initialVideoFile, onIn
                 } else if (window.aistudio?.openSelectKey) {
                     await window.aistudio.openSelectKey();
                     setApiKeySelected(true); 
-                    return; 
                 } else {
                     throw new Error("API key selection is not available.");
                 }

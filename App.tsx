@@ -5,14 +5,16 @@ import { PoseChecker } from './components/PoseChecker';
 import { FitnessQA } from './components/FitnessQA';
 import { CreatorStudio } from './components/ImageEditor';
 import { Settings } from './components/Settings';
-import { LogoIcon, GoogleIcon } from './components/shared/icons';
+import { ExerciseLibrary } from './components/ExerciseLibrary';
+import { Dashboard } from './components/Dashboard';
+import { LogoIcon, GoogleIcon, DashboardIcon } from './components/shared/icons';
 import { ToastContainer } from './components/shared/Toast';
 import { useAuth } from './hooks/useAuth';
 
-type Tab = 'analyzer' | 'pose' | 'chat' | 'qa' | 'editor' | 'settings';
+type Tab = 'dashboard' | 'analyzer' | 'library' | 'pose' | 'chat' | 'qa' | 'editor' | 'settings';
 
 const App: React.FC = () => {
-    const [activeTab, setActiveTab] = useState<Tab>('analyzer');
+    const [activeTab, setActiveTab] = useState<Tab>('dashboard');
     const [recordedVideo, setRecordedVideo] = useState<File | null>(null);
     const { user, loading, signInWithGoogle, signOutUser } = useAuth();
 
@@ -27,8 +29,12 @@ const App: React.FC = () => {
 
     const renderTabContent = () => {
         switch (activeTab) {
+            case 'dashboard':
+                return <Dashboard user={user} />;
             case 'analyzer':
-                return <GymAnalyzer initialVideoFile={recordedVideo} onInitialVideoConsumed={clearRecordedVideo} />;
+                return <GymAnalyzer user={user} initialVideoFile={recordedVideo} onInitialVideoConsumed={clearRecordedVideo} />;
+            case 'library':
+                return <ExerciseLibrary />;
             case 'pose':
                 return <PoseChecker />;
             case 'chat':
@@ -40,7 +46,7 @@ const App: React.FC = () => {
             case 'settings':
                 return <Settings />;
             default:
-                return <GymAnalyzer />;
+                return <Dashboard user={user} />;
         }
     };
 
@@ -103,7 +109,9 @@ const App: React.FC = () => {
                     </header>
 
                     <nav className="mb-10 p-2 bg-slate-800/50 ring-1 ring-slate-700 rounded-lg shadow-lg flex justify-center flex-wrap gap-x-2 sm:gap-x-4">
+                        <TabButton tab="dashboard" label="Dashboard" />
                         <TabButton tab="analyzer" label="Gym Analyzer" />
+                        <TabButton tab="library" label="Exercise Library" />
                         <TabButton tab="pose" label="Pose Checker" />
                         <TabButton tab="chat" label="Fitness Chat" />
                         <TabButton tab="qa" label="Fitness Q&A" />

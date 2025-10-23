@@ -1,4 +1,4 @@
-import { GoogleGenAI, Part, Type, GenerateContentResponse, GroundingChunk, Modality } from "@google/genai";
+import { GoogleGenAI, Part, Type, GenerateContentResponse, GroundingChunk, Modality, Chat } from "@google/genai";
 import { ApiKeyError } from '../utils/errors';
 import { FitnessLevel, Goal } from "../hooks/useUserPreferences";
 
@@ -144,7 +144,7 @@ export const generateWorkoutPlan = async (
         try {
             const response = await ai.models.generateContent({
                 model: 'gemini-2.5-pro',
-                contents: prompt,
+                contents: {parts: [{text: prompt}]},
                 config: {
                     responseMimeType: "application/json",
                     responseSchema: {
@@ -294,7 +294,7 @@ export const getGroundedAnswer = async (
     try {
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
-            contents: `You are a helpful fitness and health expert. Provide a comprehensive and accurate answer to the following question: "${question}"`,
+            contents: {parts: [{text: `You are a helpful fitness and health expert. Provide a comprehensive and accurate answer to the following question: "${question}"`}]},
             config: {
                 tools: [{ googleSearch: {} }],
             },
@@ -423,13 +423,17 @@ export const getChatResponseStream = (
 - **STRICTLY NO MEDICAL ADVICE:** This is critical. If a user asks about injuries, pain, specific health conditions, supplements, or anything that could be considered medical advice, you MUST politely decline and strongly recommend they consult a qualified healthcare professional. For example, say: "That's a great question, but it's best discussed with a doctor or physical therapist who can give you personalized advice."`;
 
     try {
-        return ai.models.generateContentStream({
+        const chat: Chat = ai.chats.create({
             model: 'gemini-2.5-flash',
-            contents: history,
+            history: history.slice(0, history.length -1),
             config: {
                 systemInstruction: systemInstruction,
             }
         });
+        const lastMessage = history[history.length -1];
+        // Fix: get last message content
+        const message = lastMessage.parts[0].text;
+        return chat.sendMessageStream({ message });
     } catch (e) {
         console.error(`Error in chat stream:`, e);
         const error = e instanceof Error ? e : new Error(String(e));
@@ -437,4 +441,113 @@ export const getChatResponseStream = (
         // but the primary error handling will be in the component that consumes the stream.
         throw new Error(`Failed to get chat response from Gemini API: ${error.message}`);
     }
+};
+
+// New function for identifying food from an image
+export const analyzeFoodImage = async (base64Image: string, mimeType: string): Promise<string[]> => {
+    if (!process.env.API_KEY) {
+        throw new Error("API_KEY environment variable is not set.");
+    }
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+    const imagePart: Part = {
+        inlineData: { data: base64Image, mimeType }
+    };
+
+    const prompt = "Analyze this image and identify all the food items present. Return a JSON array of strings, where each string is a food item. Be concise and accurate. Example: [\"scrambled eggs\", \"bacon\", \"toast with butter\", \"orange juice\"]";
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: { parts: [imagePart, { text: prompt }] },
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING }
+                }
+            }
+        });
+        return JSON.parse(response.text);
+    } catch (e) {
+        console.error(`Error analyzing food image:`, e);
+        const error = e instanceof Error ? e : new Error(String(e));
+        throw new Error(`Failed to identify food from image: ${error.message}`);
+    }
+};
+
+// New type for nutritional analysis result
+export interface NutritionalInfo {
+    calories: number;
+    macronutrients: {
+        protein: number;
+        carbohydrates: number;
+        fat: number;
+    };
+    vitamins: { name: string; amount: string }[];
+    minerals: { name: string; amount: string }[];
 }
+
+// New function for getting nutritional analysis
+export const getNutritionalAnalysis = async (foodItems: string[]): Promise<NutritionalInfo> => {
+    if (!process.env.API_KEY) {
+        throw new Error("API_KEY environment variable is not set.");
+    }
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+    const foodList = foodItems.join(', ');
+    const prompt = `You are an expert nutritionist. Given the following list of food items: "${foodList}", provide a detailed nutritional analysis. Estimate portion sizes reasonably for a single, typical meal. Return the data as a single, valid JSON object.`;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: {parts: [{text: prompt}]},
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        calories: { type: Type.NUMBER, description: "Total estimated calories, as a whole number." },
+                        macronutrients: {
+                            type: Type.OBJECT,
+                            properties: {
+                                protein: { type: Type.NUMBER, description: "Grams of protein." },
+                                carbohydrates: { type: Type.NUMBER, description: "Grams of carbohydrates." },
+                                fat: { type: Type.NUMBER, description: "Grams of fat." }
+                            },
+                            required: ["protein", "carbohydrates", "fat"]
+                        },
+                        vitamins: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    name: { type: Type.STRING, description: "Name of the vitamin (e.g., Vitamin C)." },
+                                    amount: { type: Type.STRING, description: "Amount with units (e.g., 90mg)." }
+                                },
+                                required: ["name", "amount"]
+                            }
+                        },
+                        minerals: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    name: { type: Type.STRING, description: "Name of the mineral (e.g., Iron)." },
+                                    amount: { type: Type.STRING, description: "Amount with units (e.g., 18mg)." }
+                                },
+                                required: ["name", "amount"]
+                            }
+                        }
+                    },
+                    required: ["calories", "macronutrients", "vitamins", "minerals"]
+                }
+            }
+        });
+        return JSON.parse(response.text);
+    } catch (e) {
+        console.error(`Error getting nutritional analysis:`, e);
+        const error = e instanceof Error ? e : new Error(String(e));
+        throw new Error(`Failed to get nutritional analysis: ${error.message}`);
+    }
+};
